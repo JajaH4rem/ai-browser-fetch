@@ -97,3 +97,60 @@ describe('--wait-for', () => {
     assert.equal(result.status, 2);
   });
 });
+
+describe('--json', () => {
+  it('outputs valid JSON with required fields on success', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.equal(typeof json.url, 'string');
+    assert.equal(typeof json.title, 'string');
+    assert.equal(typeof json.text, 'string');
+    assert.equal(typeof json.length, 'number');
+    assert.equal(typeof json.timestamp, 'string');
+    assert.match(json.text, /Example Domain/);
+  });
+
+  it('includes status code', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json'], 30000);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.status, 200);
+  });
+
+  it('outputs JSON with success:false on navigation failure', () => {
+    const result = spawnSync(
+      'node',
+      [SCRIPT, 'http://10.255.255.1', '--timeout', '3000', '--retry', '0', '--json'],
+      { encoding: 'utf8', timeout: 15000 }
+    );
+    assert.equal(result.status, 2);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, false);
+    assert.equal(typeof json.error, 'string');
+  });
+
+  it('text field contains markdown when --json and --markdown combined', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--markdown'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.match(json.text, /Example Domain/);
+  });
+});
+
+describe('--markdown', () => {
+  it('returns content as markdown', () => {
+    const result = run(['https://example.com', '--retry', '0', '--markdown'], 30000);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Example Domain/);
+  });
+});
+
+describe('--url', () => {
+  it('prints final URL on a separate line in plain mode', () => {
+    const result = run(['https://example.com', '--retry', '0', '--url'], 30000);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /https:\/\/example\.com/);
+  });
+});
