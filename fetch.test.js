@@ -97,3 +97,87 @@ describe('--wait-for', () => {
     assert.equal(result.status, 2);
   });
 });
+
+describe('--json', () => {
+  it('outputs valid JSON with required fields on success', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.equal(typeof json.url, 'string');
+    assert.equal(typeof json.title, 'string');
+    assert.equal(typeof json.text, 'string');
+    assert.equal(typeof json.length, 'number');
+    assert.equal(typeof json.timestamp, 'string');
+    assert.match(json.text, /Example Domain/);
+  });
+
+  it('includes status code', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json'], 30000);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.status, 200);
+  });
+
+  it('outputs JSON with success:false on navigation failure, no text/length fields', () => {
+    const result = spawnSync(
+      'node',
+      [SCRIPT, 'http://10.255.255.1', '--timeout', '3000', '--retry', '0', '--json'],
+      { encoding: 'utf8', timeout: 15000 }
+    );
+    assert.equal(result.status, 2);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, false);
+    assert.equal(typeof json.error, 'string');
+    assert.equal(json.text, undefined);
+    assert.equal(json.length, undefined);
+  });
+
+  it('text field contains markdown when --json and --markdown combined', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--markdown'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.match(json.text, /Example Domain/);
+  });
+});
+
+describe('--markdown', () => {
+  it('returns content as markdown', () => {
+    const result = run(['https://example.com', '--retry', '0', '--markdown'], 30000);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Example Domain/);
+  });
+});
+
+describe('--url', () => {
+  it('prints final URL on its own line without a prefix', () => {
+    const result = run(['https://example.com', '--retry', '0', '--url'], 30000);
+    assert.equal(result.status, 0);
+    const lines = result.stdout.split('\n');
+    // First line must be the bare URL, no "URL: " prefix
+    assert.match(lines[0], /^https:\/\/example\.com/);
+  });
+});
+
+describe('--json + --max-chars', () => {
+  it('length field reflects truncated text length', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--max-chars', '20'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.text.length, 20);
+    assert.equal(json.length, 20);
+  });
+});
+
+describe('--json + --selector not found', () => {
+  it('outputs JSON error when selector matches nothing', () => {
+    const result = run(
+      ['https://example.com', '--retry', '0', '--json', '--selector', '#does-not-exist-xyz'],
+      30000
+    );
+    assert.equal(result.status, 4);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, false);
+    assert.equal(typeof json.error, 'string');
+  });
+});

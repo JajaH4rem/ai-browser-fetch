@@ -11,6 +11,8 @@ const EXIT = {
   EXTRACTION_FAILED: 5,
 };
 
+const MIN_READABLE_CHARS = 200;
+
 function parseArgs(argv) {
   const args = {
     url: null,
@@ -22,6 +24,9 @@ function parseArgs(argv) {
     waitForTimeout: 10000,
     selector: null,
     maxChars: null,
+    json: false,
+    markdown: false,
+    printUrl: false,
   };
   const rest = argv.slice(2);
 
@@ -34,6 +39,9 @@ function parseArgs(argv) {
     else if (rest[i] === '--wait-for-timeout') args.waitForTimeout = Number(rest[++i]);
     else if (rest[i] === '--selector') args.selector = rest[++i];
     else if (rest[i] === '--max-chars') args.maxChars = Number(rest[++i]);
+    else if (rest[i] === '--json') args.json = true;
+    else if (rest[i] === '--markdown') args.markdown = true;
+    else if (rest[i] === '--url') args.printUrl = true;
     else if (!rest[i].startsWith('--')) args.url = rest[i];
   }
 
@@ -49,14 +57,46 @@ function isValidUrl(str) {
   }
 }
 
-async function fetchPage(url, { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector }) {
+function toMarkdown(html, url) {
+  const { JSDOM } = require('jsdom');
+  const { Readability } = require('@mozilla/readability');
+  const TurndownService = require('turndown');
+
+  const dom = new JSDOM(html, { url });
+  const article = new Readability(dom.window.document).parse();
+
+  if (!article || !article.textContent || article.textContent.trim().length < MIN_READABLE_CHARS) {
+    return null;
+  }
+
+  const turndown = new TurndownService();
+  return turndown.turndown(article.content);
+}
+
+function emitJson(data, maxChars) {
+  if (data.success === false) {
+    console.log(JSON.stringify(data));
+    return;
+  }
+  const text = maxChars !== null && data.text && data.text.length > maxChars
+    ? data.text.slice(0, maxChars)
+    : (data.text || '');
+  console.log(JSON.stringify({ ...data, text, length: text.length }));
+}
+
+async function fetchPage(url, args) {
   const { chromium } = require('playwright');
+  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown, maxChars } = args;
 
   let browser;
   try {
     browser = await chromium.launch();
   } catch (err) {
-    console.error(`Browser launch failed: ${err.message}`);
+    if (json) {
+      emitJson({ success: false, url, error: `Browser launch failed: ${err.message}` }, maxChars);
+    } else {
+      console.error(`Browser launch failed: ${err.message}`);
+    }
     process.exit(EXIT.BROWSER_FAILED);
   }
 
@@ -70,10 +110,11 @@ async function fetchPage(url, { timeout, retry, waitUntil, wait, waitFor, waitFo
   const page = await context.newPage();
 
   let lastErr;
+  let response = null;
   for (let attempt = 0; attempt <= retry; attempt++) {
     const t = Math.round(timeout * (1 + attempt * 0.5));
     try {
-      await page.goto(url, { waitUntil: waitUntil || 'load', timeout: t });
+      response = await page.goto(url, { waitUntil: waitUntil || 'load', timeout: t });
       lastErr = null;
       break;
     } catch (err) {
@@ -83,75 +124,118 @@ async function fetchPage(url, { timeout, retry, waitUntil, wait, waitFor, waitFo
 
   if (lastErr) {
     await browser.close();
-    console.error(`Navigation failed: ${lastErr.message}`);
+    const msg = `Navigation failed: ${lastErr.message}`;
+    if (json) {
+      emitJson({ success: false, url, error: msg }, maxChars);
+    } else {
+      console.error(msg);
+    }
     process.exit(EXIT.NAV_TIMEOUT);
   }
 
-  // --wait: extra fixed delay after page load
   if (wait > 0) {
     await page.waitForTimeout(wait);
   }
 
-  // --wait-for: wait until a selector appears (hard timeout)
   if (waitFor) {
     try {
       await page.waitForSelector(waitFor, { timeout: waitForTimeout });
     } catch {
       await browser.close();
-      console.error(`Timed out waiting for selector: ${waitFor}`);
+      const msg = `Timed out waiting for selector: ${waitFor}`;
+      if (json) {
+        emitJson({ success: false, url, error: msg }, maxChars);
+      } else {
+        console.error(msg);
+      }
       process.exit(EXIT.NAV_TIMEOUT);
     }
   }
 
+  const finalUrl = page.url();
+  const title = await page.title();
+  const status = response ? response.status() : null;
+  const contentType = response ? (response.headers()['content-type'] || null) : null;
+
+  // Resolve content frame (iframe detection) — used by plain and markdown modes
+  const contentFrame =
+    page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
+
   let text;
   try {
     if (selector) {
-      // --selector: extract specific element
       const el = await page.$(selector);
       if (!el) {
         await browser.close();
-        console.error(`Selector not found: ${selector}`);
+        const msg = `Selector not found: ${selector}`;
+        if (json) {
+          emitJson({ success: false, url: finalUrl, error: msg }, maxChars);
+        } else {
+          console.error(msg);
+        }
         process.exit(EXIT.SELECTOR_NOT_FOUND);
       }
       text = await el.evaluate((node) => node.innerText);
+    } else if (markdown) {
+      // Use iframe-detected frame for content, same as plain mode
+      const html = await contentFrame.content();
+      const md = toMarkdown(html, finalUrl);
+      text = md !== null ? md : await contentFrame.evaluate(() => document.body.innerText);
     } else {
-      // Auto iframe detection: use first non-blank child frame if present
-      const contentFrame =
-        page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
       text = await contentFrame.evaluate(() => document.body.innerText);
     }
   } catch (err) {
     await browser.close();
-    console.error(`Extraction failed: ${err.message}`);
+    const msg = `Extraction failed: ${err.message}`;
+    if (json) {
+      emitJson({ success: false, url: finalUrl, error: msg }, maxChars);
+    } else {
+      console.error(msg);
+    }
     process.exit(EXIT.EXTRACTION_FAILED);
   }
 
   await browser.close();
-  return text;
+  return { finalUrl, title, status, contentType, text };
 }
 
 async function main() {
   const args = parseArgs(process.argv);
 
   if (!args.url) {
-    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>] [--wait <ms>] [--wait-for <selector>] [--selector <css>] [--max-chars <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
   if (!isValidUrl(args.url)) {
     console.error(`Invalid URL: ${args.url}`);
-    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>] [--wait <ms>] [--wait-for <selector>] [--selector <css>] [--max-chars <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
-  let text = await fetchPage(args.url, args);
+  const { finalUrl, title, status, contentType, text: rawText } = await fetchPage(args.url, args);
 
-  // --max-chars: truncate from the start
-  if (args.maxChars !== null && text.length > args.maxChars) {
-    text = text.slice(0, args.maxChars);
+  if (args.json) {
+    emitJson({
+      success: true,
+      url: finalUrl,
+      title,
+      status,
+      contentType,
+      timestamp: new Date().toISOString(),
+      text: rawText,
+    }, args.maxChars);
+  } else {
+    let text = rawText;
+    if (args.maxChars !== null && text.length > args.maxChars) {
+      text = text.slice(0, args.maxChars);
+    }
+    if (args.printUrl) {
+      console.log(finalUrl);
+    }
+    console.log(text);
   }
 
-  console.log(text);
   process.exit(EXIT.SUCCESS);
 }
 
