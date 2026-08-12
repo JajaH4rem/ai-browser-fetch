@@ -118,7 +118,7 @@ describe('--json', () => {
     assert.equal(json.status, 200);
   });
 
-  it('outputs JSON with success:false on navigation failure', () => {
+  it('outputs JSON with success:false on navigation failure, no text/length fields', () => {
     const result = spawnSync(
       'node',
       [SCRIPT, 'http://10.255.255.1', '--timeout', '3000', '--retry', '0', '--json'],
@@ -128,6 +128,8 @@ describe('--json', () => {
     const json = JSON.parse(result.stdout);
     assert.equal(json.success, false);
     assert.equal(typeof json.error, 'string');
+    assert.equal(json.text, undefined);
+    assert.equal(json.length, undefined);
   });
 
   it('text field contains markdown when --json and --markdown combined', () => {

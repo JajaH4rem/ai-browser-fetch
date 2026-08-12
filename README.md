@@ -75,34 +75,29 @@ node fetch.js <url> [flags]
 ### Output
 | Flag | Description |
 |------|-------------|
-| *(default)* | Plain text |
+| *(default)* | Plain text (`innerText`) |
+| `--json` | Structured JSON: `{success, url, title, status, contentType, timestamp, text, length}` |
+| `--markdown` | Clean markdown via Readability, fallback to plain text |
+| `--url` | Print final URL as first line (after redirects) |
 | `--max-chars <n>` | Truncate output to N characters (from the start) |
 
 ### Rendering
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--wait <ms>` | Extra wait after page load | `2000` |
+| `--wait <ms>` | Extra wait after page load | `0` |
 | `--wait-for <selector>` | Wait until element appears | — |
-| `--wait-until <event>` | `load` \| `networkidle` \| `domcontentloaded` | `networkidle` |
+| `--wait-until <event>` | `load` \| `networkidle` \| `domcontentloaded` | `load` |
 
 ### Content
 | Flag | Description |
 |------|-------------|
 | `--selector <css>` | Extract a specific element only |
-| `--iframe` | Force iframe content extraction |
-| `--no-iframe` | Disable iframe detection |
 
 ### Reliability
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--retry <n>` | Retry on failure with escalating timeout | `1` |
 | `--timeout <ms>` | Navigation timeout | `30000` |
-
-### Debug
-| Flag | Description |
-|------|-------------|
-| `--headed` | Open a visible browser window |
-| `--screenshot <path>` | Save a screenshot to file |
 
 ---
 
@@ -136,25 +131,30 @@ continue reasoning
 **Claude Code** — add to memory or CLAUDE.md:
 ```
 When WebFetch returns little or no useful content, use:
-node /path/to/fetch.js <url>
+node /path/to/fetch.js <url> --json
+
+If the result still looks empty or incomplete, retry with:
+node /path/to/fetch.js <url> --json --wait-until networkidle --wait 3000
 ```
 
 **Cursor** — add to system prompt:
 ```
 If a webpage appears JS-rendered or returns no content, invoke ai-browser-fetch.
+If initial fetch returns little content, retry with --wait-until networkidle --wait 3000.
 ```
 
 **OpenAI Agents / Cline / Roo Code** — tool description:
 ```
 Fallback browser fetch. Use when HTTP fetch returns empty or challenge content.
+For heavily JS-driven pages, add --wait-until networkidle --wait 3000.
 ```
 
 ---
 
 ## Roadmap
 
-- **Phase 1 — MVP** *(current)*: reliable browser-backed fetch, plain text output
-- **Phase 2 — AI-friendly**: `--json`, `--markdown` (Readability), better output formatting
+- **Phase 1 — MVP** ✅: reliable browser-backed fetch, plain text output
+- **Phase 2 — AI-friendly** ✅: `--json`, `--markdown`, `--url`, structured output
 - **Phase 3 — Reliability**: `--stealth`, custom UA, better retry strategies
 - **Phase 4 — Advanced**: `--links`, `--metadata`, cookies, global `ai-fetch` binary
 
