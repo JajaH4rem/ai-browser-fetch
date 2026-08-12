@@ -7,17 +7,33 @@ const EXIT = {
   INVALID_ARGS: 1,
   NAV_TIMEOUT: 2,
   BROWSER_FAILED: 3,
+  SELECTOR_NOT_FOUND: 4,
   EXTRACTION_FAILED: 5,
 };
 
 function parseArgs(argv) {
-  const args = { url: null, timeout: 30000, retry: 1, waitUntil: 'load' };
+  const args = {
+    url: null,
+    timeout: 30000,
+    retry: 1,
+    waitUntil: 'load',
+    wait: 0,
+    waitFor: null,
+    waitForTimeout: 10000,
+    selector: null,
+    maxChars: null,
+  };
   const rest = argv.slice(2);
 
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === '--timeout') args.timeout = Number(rest[++i]);
     else if (rest[i] === '--retry') args.retry = Number(rest[++i]);
     else if (rest[i] === '--wait-until') args.waitUntil = rest[++i];
+    else if (rest[i] === '--wait') args.wait = Number(rest[++i]);
+    else if (rest[i] === '--wait-for') args.waitFor = rest[++i];
+    else if (rest[i] === '--wait-for-timeout') args.waitForTimeout = Number(rest[++i]);
+    else if (rest[i] === '--selector') args.selector = rest[++i];
+    else if (rest[i] === '--max-chars') args.maxChars = Number(rest[++i]);
     else if (!rest[i].startsWith('--')) args.url = rest[i];
   }
 
@@ -33,7 +49,7 @@ function isValidUrl(str) {
   }
 }
 
-async function fetchPage(url, { timeout, retry, waitUntil }) {
+async function fetchPage(url, { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector }) {
   const { chromium } = require('playwright');
 
   let browser;
@@ -71,12 +87,39 @@ async function fetchPage(url, { timeout, retry, waitUntil }) {
     process.exit(EXIT.NAV_TIMEOUT);
   }
 
+  // --wait: extra fixed delay after page load
+  if (wait > 0) {
+    await page.waitForTimeout(wait);
+  }
+
+  // --wait-for: wait until a selector appears (hard timeout)
+  if (waitFor) {
+    try {
+      await page.waitForSelector(waitFor, { timeout: waitForTimeout });
+    } catch {
+      await browser.close();
+      console.error(`Timed out waiting for selector: ${waitFor}`);
+      process.exit(EXIT.NAV_TIMEOUT);
+    }
+  }
+
   let text;
   try {
-    // Auto iframe detection: use first non-blank child frame if present
-    const contentFrame =
-      page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
-    text = await contentFrame.evaluate(() => document.body.innerText);
+    if (selector) {
+      // --selector: extract specific element
+      const el = await page.$(selector);
+      if (!el) {
+        await browser.close();
+        console.error(`Selector not found: ${selector}`);
+        process.exit(EXIT.SELECTOR_NOT_FOUND);
+      }
+      text = await el.evaluate((node) => node.innerText);
+    } else {
+      // Auto iframe detection: use first non-blank child frame if present
+      const contentFrame =
+        page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
+      text = await contentFrame.evaluate(() => document.body.innerText);
+    }
   } catch (err) {
     await browser.close();
     console.error(`Extraction failed: ${err.message}`);
@@ -91,17 +134,23 @@ async function main() {
   const args = parseArgs(process.argv);
 
   if (!args.url) {
-    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>] [--wait <ms>] [--wait-for <selector>] [--selector <css>] [--max-chars <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
   if (!isValidUrl(args.url)) {
     console.error(`Invalid URL: ${args.url}`);
-    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--timeout <ms>] [--retry <n>] [--wait <ms>] [--wait-for <selector>] [--selector <css>] [--max-chars <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
-  const text = await fetchPage(args.url, args);
+  let text = await fetchPage(args.url, args);
+
+  // --max-chars: truncate from the start
+  if (args.maxChars !== null && text.length > args.maxChars) {
+    text = text.slice(0, args.maxChars);
+  }
+
   console.log(text);
   process.exit(EXIT.SUCCESS);
 }
