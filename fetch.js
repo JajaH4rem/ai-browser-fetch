@@ -73,24 +73,23 @@ function toMarkdown(html, url) {
   return turndown.turndown(article.content);
 }
 
-function outputJson(data, args) {
-  let text = data.text || '';
-  if (args.maxChars !== null && text.length > args.maxChars) {
-    text = text.slice(0, args.maxChars);
-  }
+function emitJson(data, maxChars) {
+  const text = maxChars !== null && data.text && data.text.length > maxChars
+    ? data.text.slice(0, maxChars)
+    : (data.text || '');
   console.log(JSON.stringify({ ...data, text, length: text.length }));
 }
 
 async function fetchPage(url, args) {
   const { chromium } = require('playwright');
-  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown } = args;
+  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown, maxChars } = args;
 
   let browser;
   try {
     browser = await chromium.launch();
   } catch (err) {
     if (json) {
-      outputJson({ success: false, url, error: `Browser launch failed: ${err.message}` }, args);
+      emitJson({ success: false, url, error: `Browser launch failed: ${err.message}` }, maxChars);
     } else {
       console.error(`Browser launch failed: ${err.message}`);
     }
@@ -123,7 +122,7 @@ async function fetchPage(url, args) {
     await browser.close();
     const msg = `Navigation failed: ${lastErr.message}`;
     if (json) {
-      outputJson({ success: false, url, error: msg }, args);
+      emitJson({ success: false, url, error: msg }, maxChars);
     } else {
       console.error(msg);
     }
@@ -141,7 +140,7 @@ async function fetchPage(url, args) {
       await browser.close();
       const msg = `Timed out waiting for selector: ${waitFor}`;
       if (json) {
-        outputJson({ success: false, url, error: msg }, args);
+        emitJson({ success: false, url, error: msg }, maxChars);
       } else {
         console.error(msg);
       }
@@ -154,6 +153,10 @@ async function fetchPage(url, args) {
   const status = response ? response.status() : null;
   const contentType = response ? (response.headers()['content-type'] || null) : null;
 
+  // Resolve content frame (iframe detection) — used by plain and markdown modes
+  const contentFrame =
+    page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
+
   let text;
   try {
     if (selector) {
@@ -162,7 +165,7 @@ async function fetchPage(url, args) {
         await browser.close();
         const msg = `Selector not found: ${selector}`;
         if (json) {
-          outputJson({ success: false, url: finalUrl, error: msg }, args);
+          emitJson({ success: false, url: finalUrl, error: msg }, maxChars);
         } else {
           console.error(msg);
         }
@@ -170,19 +173,18 @@ async function fetchPage(url, args) {
       }
       text = await el.evaluate((node) => node.innerText);
     } else if (markdown) {
-      const html = await page.content();
+      // Use iframe-detected frame for content, same as plain mode
+      const html = await contentFrame.content();
       const md = toMarkdown(html, finalUrl);
-      text = md !== null ? md : await page.evaluate(() => document.body.innerText);
+      text = md !== null ? md : await contentFrame.evaluate(() => document.body.innerText);
     } else {
-      const contentFrame =
-        page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
       text = await contentFrame.evaluate(() => document.body.innerText);
     }
   } catch (err) {
     await browser.close();
     const msg = `Extraction failed: ${err.message}`;
     if (json) {
-      outputJson({ success: false, url: finalUrl, error: msg }, args);
+      emitJson({ success: false, url: finalUrl, error: msg }, maxChars);
     } else {
       console.error(msg);
     }
@@ -209,25 +211,23 @@ async function main() {
 
   const { finalUrl, title, status, contentType, text: rawText } = await fetchPage(args.url, args);
 
-  let text = rawText;
-  if (args.maxChars !== null && text.length > args.maxChars) {
-    text = text.slice(0, args.maxChars);
-  }
-
   if (args.json) {
-    console.log(JSON.stringify({
+    emitJson({
       success: true,
       url: finalUrl,
       title,
       status,
       contentType,
       timestamp: new Date().toISOString(),
-      text,
-      length: text.length,
-    }));
+      text: rawText,
+    }, args.maxChars);
   } else {
+    let text = rawText;
+    if (args.maxChars !== null && text.length > args.maxChars) {
+      text = text.slice(0, args.maxChars);
+    }
     if (args.printUrl) {
-      console.log(`URL: ${finalUrl}`);
+      console.log(finalUrl);
     }
     console.log(text);
   }

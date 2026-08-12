@@ -148,9 +148,34 @@ describe('--markdown', () => {
 });
 
 describe('--url', () => {
-  it('prints final URL on a separate line in plain mode', () => {
+  it('prints final URL on its own line without a prefix', () => {
     const result = run(['https://example.com', '--retry', '0', '--url'], 30000);
     assert.equal(result.status, 0);
-    assert.match(result.stdout, /https:\/\/example\.com/);
+    const lines = result.stdout.split('\n');
+    // First line must be the bare URL, no "URL: " prefix
+    assert.match(lines[0], /^https:\/\/example\.com/);
+  });
+});
+
+describe('--json + --max-chars', () => {
+  it('length field reflects truncated text length', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--max-chars', '20'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.text.length, 20);
+    assert.equal(json.length, 20);
+  });
+});
+
+describe('--json + --selector not found', () => {
+  it('outputs JSON error when selector matches nothing', () => {
+    const result = run(
+      ['https://example.com', '--retry', '0', '--json', '--selector', '#does-not-exist-xyz'],
+      30000
+    );
+    assert.equal(result.status, 4);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, false);
+    assert.equal(typeof json.error, 'string');
   });
 });
