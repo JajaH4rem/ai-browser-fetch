@@ -4,13 +4,15 @@
   "description": "A drop-in browser fetch for AI agents.",
   "main": "fetch.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test fetch.test.js"
   },
   "license": "MIT",
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^29.1.1",
     "playwright": "^1.62.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "turndown": "^7.2.4"
   }
 }
