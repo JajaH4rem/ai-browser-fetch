@@ -12,6 +12,7 @@ const EXIT = {
 };
 
 const MIN_READABLE_CHARS = 200;
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 
 function parseArgs(argv) {
   const args = {
@@ -27,6 +28,11 @@ function parseArgs(argv) {
     json: false,
     markdown: false,
     printUrl: false,
+    stealth: false,
+    headed: false,
+    ua: DEFAULT_UA,
+    noUa: false,
+    screenshot: null,
   };
   const rest = argv.slice(2);
 
@@ -42,6 +48,11 @@ function parseArgs(argv) {
     else if (rest[i] === '--json') args.json = true;
     else if (rest[i] === '--markdown') args.markdown = true;
     else if (rest[i] === '--url') args.printUrl = true;
+    else if (rest[i] === '--stealth') args.stealth = true;
+    else if (rest[i] === '--headed') args.headed = true;
+    else if (rest[i] === '--ua') args.ua = rest[++i];
+    else if (rest[i] === '--no-ua') args.noUa = true;
+    else if (rest[i] === '--screenshot') args.screenshot = rest[++i];
     else if (!rest[i].startsWith('--')) args.url = rest[i];
   }
 
@@ -84,13 +95,26 @@ function emitJson(data, maxChars) {
   console.log(JSON.stringify({ ...data, text, length: text.length }));
 }
 
-async function fetchPage(url, args) {
+async function launchBrowser(args) {
+  const { stealth, headed } = args;
+
+  if (stealth) {
+    const { chromium } = require('playwright-extra');
+    const stealth_plugin = require('puppeteer-extra-plugin-stealth')();
+    chromium.use(stealth_plugin);
+    return chromium.launch({ headless: !headed });
+  }
+
   const { chromium } = require('playwright');
-  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown, maxChars } = args;
+  return chromium.launch({ headless: !headed });
+}
+
+async function fetchPage(url, args) {
+  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown, maxChars, noUa, ua, screenshot } = args;
 
   let browser;
   try {
-    browser = await chromium.launch();
+    browser = await launchBrowser(args);
   } catch (err) {
     if (json) {
       emitJson({ success: false, url, error: `Browser launch failed: ${err.message}` }, maxChars);
@@ -100,13 +124,15 @@ async function fetchPage(url, args) {
     process.exit(EXIT.BROWSER_FAILED);
   }
 
-  const context = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  const contextOptions = {
     viewport: { width: 1280, height: 900 },
     locale: 'en-US',
-  });
+  };
+  if (!noUa) {
+    contextOptions.userAgent = ua;
+  }
 
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
 
   let lastErr;
@@ -152,6 +178,11 @@ async function fetchPage(url, args) {
     }
   }
 
+  // Screenshot after navigation/wait, before extraction
+  if (screenshot) {
+    await page.screenshot({ path: screenshot, fullPage: true });
+  }
+
   const finalUrl = page.url();
   const title = await page.title();
   const status = response ? response.status() : null;
@@ -177,7 +208,6 @@ async function fetchPage(url, args) {
       }
       text = await el.evaluate((node) => node.innerText);
     } else if (markdown) {
-      // Use iframe-detected frame for content, same as plain mode
       const html = await contentFrame.content();
       const md = toMarkdown(html, finalUrl);
       text = md !== null ? md : await contentFrame.evaluate(() => document.body.innerText);
@@ -203,13 +233,13 @@ async function main() {
   const args = parseArgs(process.argv);
 
   if (!args.url) {
-    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
   if (!isValidUrl(args.url)) {
     console.error(`Invalid URL: ${args.url}`);
-    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 

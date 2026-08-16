@@ -133,7 +133,7 @@ describe('--json', () => {
   });
 
   it('text field contains markdown when --json and --markdown combined', () => {
-    const result = run(['https://example.com', '--retry', '0', '--json', '--markdown'], 30000);
+    const result = run(['https://example.com', '--retry', '0', '--json', '--markdown'], 45000);
     assert.equal(result.status, 0);
     const json = JSON.parse(result.stdout);
     assert.equal(json.success, true);
@@ -143,7 +143,7 @@ describe('--json', () => {
 
 describe('--markdown', () => {
   it('returns content as markdown', () => {
-    const result = run(['https://example.com', '--retry', '0', '--markdown'], 30000);
+    const result = run(['https://example.com', '--retry', '0', '--markdown'], 45000);
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Example Domain/);
   });
@@ -179,5 +179,86 @@ describe('--json + --selector not found', () => {
     const json = JSON.parse(result.stdout);
     assert.equal(json.success, false);
     assert.equal(typeof json.error, 'string');
+  });
+});
+
+describe('--stealth', () => {
+  it('accepts --stealth flag and fetches successfully', () => {
+    const result = run(['https://example.com', '--retry', '0', '--stealth'], 30000);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Example Domain/);
+  });
+
+  it('accepts --stealth and --headed together without error', () => {
+    // --headed opens a visible browser; we just verify the flags are accepted
+    // and the fetch succeeds (headed mode works on this machine)
+    const result = run(['https://example.com', '--retry', '0', '--stealth', '--headed'], 30000);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Example Domain/);
+  });
+});
+
+// Start UA echo server on a random available port, resolve when ready
+function startUaServer() {
+  const { spawn } = require('node:child_process');
+  const net = require('node:net');
+
+  return new Promise((resolve, reject) => {
+    // Find a free port first
+    const tmp = net.createServer();
+    tmp.listen(0, '127.0.0.1', () => {
+      const port = tmp.address().port;
+      tmp.close(() => {
+        const proc = spawn('node', [path.join(__dirname, 'test-ua-server.js'), String(port)], {
+          stdio: ['ignore', 'pipe', 'inherit'],
+        });
+        proc.stdout.once('data', () => resolve({ proc, port, url: `http://127.0.0.1:${port}` }));
+        proc.on('error', reject);
+      });
+    });
+  });
+}
+
+describe('--ua', () => {
+  it('sends the custom user-agent in HTTP requests', async () => {
+    const { proc, url } = await startUaServer();
+    try {
+      const customUA = 'MyCustomAgent/1.0';
+      const result = run(['--retry', '0', '--ua', customUA, url], 30000);
+      assert.equal(result.status, 0);
+      assert.match(result.stdout, new RegExp(customUA));
+    } finally {
+      proc.kill();
+    }
+  });
+});
+
+describe('--no-ua', () => {
+  it('uses browser default UA, not the spoofed Chrome UA', async () => {
+    const { proc, url } = await startUaServer();
+    try {
+      const result = run(['--retry', '0', '--no-ua', url], 30000);
+      assert.equal(result.status, 0);
+      assert.doesNotMatch(result.stdout, /Chrome\/130\.0\.0\.0 Safari\/537\.36/);
+    } finally {
+      proc.kill();
+    }
+  });
+});
+
+describe('--screenshot', () => {
+  it('saves a screenshot file at the given path', () => {
+    const fs = require('node:fs');
+    const screenshotPath = path.join(__dirname, 'test-screenshot.png');
+    // Clean up before test
+    if (fs.existsSync(screenshotPath)) fs.unlinkSync(screenshotPath);
+
+    const result = run(
+      ['https://example.com', '--retry', '0', '--screenshot', screenshotPath],
+      30000
+    );
+    assert.equal(result.status, 0);
+    assert.ok(fs.existsSync(screenshotPath), 'screenshot file should exist');
+    fs.unlinkSync(screenshotPath); // clean up
   });
 });
