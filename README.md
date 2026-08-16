@@ -34,6 +34,8 @@ ai-browser-fetch is the fallback. One command. Predictable output. The agent doe
 - ✅ Real Chromium browser via Playwright
 - ✅ Waits for network to settle before extracting
 - ✅ Auto iframe detection
+- ✅ Stealth mode to reduce bot detection on some sites
+- ✅ Custom user-agent and screenshot support
 - ✅ Simple CLI — works with any agent that can run a shell command
 
 ---
@@ -92,6 +94,15 @@ node fetch.js <url> [flags]
 | Flag | Description |
 |------|-------------|
 | `--selector <css>` | Extract a specific element only |
+
+### Browser
+| Flag | Description |
+|------|-------------|
+| `--stealth` | Enable stealth plugin to reduce bot detection on some sites |
+| `--headed` | Open a visible browser window |
+| `--ua <string>` | Set a custom user-agent string |
+| `--no-ua` | Use the browser's default user-agent (skip spoofing) |
+| `--screenshot <path>` | Save a screenshot after page load, before extraction |
 
 ### Reliability
 | Flag | Description | Default |
@@ -155,7 +166,7 @@ For heavily JS-driven pages, add --wait-until networkidle --wait 3000.
 
 - **Phase 1 — MVP** ✅: reliable browser-backed fetch, plain text output
 - **Phase 2 — AI-friendly** ✅: `--json`, `--markdown`, `--url`, structured output
-- **Phase 3 — Reliability**: `--stealth`, custom UA, better retry strategies
+- **Phase 3 — Reliability** ✅: `--stealth`, `--ua`, `--no-ua`, `--headed`, `--screenshot`
 - **Phase 4 — Advanced**: `--links`, `--metadata`, cookies, global `ai-fetch` binary
 
 ---
