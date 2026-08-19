@@ -17,6 +17,7 @@ jobs:
 
       - run: npm install --ignore-scripts
 
-      - run: npm publish --access public
+      - name: Stage package for approval
+        run: npm stage publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
