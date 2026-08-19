@@ -4,7 +4,7 @@
   "description": "A drop-in browser fetch for AI agents.",
   "main": "fetch.js",
   "bin": {
-    "ai-fetch": "./fetch.js"
+    "ai-fetch": "fetch.js"
   },
   "files": [
     "fetch.js",
@@ -24,7 +24,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/JajaH4rem/ai-browser-fetch"
+    "url": "git+https://github.com/JajaH4rem/ai-browser-fetch.git"
   },
   "scripts": {
     "test": "node --test fetch.test.js"
