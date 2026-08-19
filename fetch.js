@@ -2,6 +2,11 @@
 
 'use strict';
 
+const { parseArgs, isValidUrl } = require('./lib/args');
+const { launchBrowser } = require('./lib/browser');
+const { toMarkdown } = require('./lib/markdown');
+const { emitJson } = require('./lib/output');
+
 const EXIT = {
   SUCCESS: 0,
   INVALID_ARGS: 1,
@@ -11,106 +16,42 @@ const EXIT = {
   EXTRACTION_FAILED: 5,
 };
 
-const MIN_READABLE_CHARS = 200;
-const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
-
-function parseArgs(argv) {
-  const args = {
-    url: null,
-    timeout: 30000,
-    retry: 1,
-    waitUntil: 'load',
-    wait: 0,
-    waitFor: null,
-    waitForTimeout: 10000,
-    selector: null,
-    maxChars: null,
-    json: false,
-    markdown: false,
-    printUrl: false,
-    stealth: false,
-    headed: false,
-    ua: DEFAULT_UA,
-    noUa: false,
-    screenshot: null,
-  };
-  const rest = argv.slice(2);
-
-  for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === '--timeout') args.timeout = Number(rest[++i]);
-    else if (rest[i] === '--retry') args.retry = Number(rest[++i]);
-    else if (rest[i] === '--wait-until') args.waitUntil = rest[++i];
-    else if (rest[i] === '--wait') args.wait = Number(rest[++i]);
-    else if (rest[i] === '--wait-for') args.waitFor = rest[++i];
-    else if (rest[i] === '--wait-for-timeout') args.waitForTimeout = Number(rest[++i]);
-    else if (rest[i] === '--selector') args.selector = rest[++i];
-    else if (rest[i] === '--max-chars') args.maxChars = Number(rest[++i]);
-    else if (rest[i] === '--json') args.json = true;
-    else if (rest[i] === '--markdown') args.markdown = true;
-    else if (rest[i] === '--url') args.printUrl = true;
-    else if (rest[i] === '--stealth') args.stealth = true;
-    else if (rest[i] === '--headed') args.headed = true;
-    else if (rest[i] === '--ua') args.ua = rest[++i];
-    else if (rest[i] === '--no-ua') args.noUa = true;
-    else if (rest[i] === '--screenshot') args.screenshot = rest[++i];
-    else if (!rest[i].startsWith('--')) args.url = rest[i];
+function extractLinks(pageUrl, anchors) {
+  const seen = new Set();
+  const result = [];
+  for (const href of anchors) {
+    if (!href) continue;
+    try {
+      const abs = new URL(href, pageUrl).href;
+      if ((abs.startsWith('http:') || abs.startsWith('https:')) && !seen.has(abs)) {
+        seen.add(abs);
+        result.push(abs);
+      }
+    } catch {
+      // skip unparseable hrefs
+    }
   }
-
-  return args;
+  return result;
 }
 
-function isValidUrl(str) {
-  try {
-    const u = new URL(str);
-    return u.protocol === 'http:' || u.protocol === 'https:';
-  } catch {
-    return false;
+function extractMeta(metaTags, title) {
+  const FIELDS = ['description', 'canonical', 'og:title', 'og:description', 'og:image'];
+  const meta = { title };
+  for (const { name, property, content } of metaTags) {
+    const key = name || property;
+    if (key && content && FIELDS.includes(key)) {
+      meta[key] = content;
+    }
   }
-}
-
-function toMarkdown(html, url) {
-  const { JSDOM } = require('jsdom');
-  const { Readability } = require('@mozilla/readability');
-  const TurndownService = require('turndown');
-
-  const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
-
-  if (!article || !article.textContent || article.textContent.trim().length < MIN_READABLE_CHARS) {
-    return null;
-  }
-
-  const turndown = new TurndownService();
-  return turndown.turndown(article.content);
-}
-
-function emitJson(data, maxChars) {
-  if (data.success === false) {
-    console.log(JSON.stringify(data));
-    return;
-  }
-  const text = maxChars !== null && data.text && data.text.length > maxChars
-    ? data.text.slice(0, maxChars)
-    : (data.text || '');
-  console.log(JSON.stringify({ ...data, text, length: text.length }));
-}
-
-async function launchBrowser(args) {
-  const { stealth, headed } = args;
-
-  if (stealth) {
-    const { chromium } = require('playwright-extra');
-    const stealth_plugin = require('puppeteer-extra-plugin-stealth')();
-    chromium.use(stealth_plugin);
-    return chromium.launch({ headless: !headed });
-  }
-
-  const { chromium } = require('playwright');
-  return chromium.launch({ headless: !headed });
+  return meta;
 }
 
 async function fetchPage(url, args) {
-  const { timeout, retry, waitUntil, wait, waitFor, waitForTimeout, selector, json, markdown, maxChars, noUa, ua, screenshot } = args;
+  const {
+    timeout, retry, waitUntil, wait, waitFor, waitForTimeout,
+    selector, json, markdown, maxChars, noUa, ua, screenshot,
+    links, metadata,
+  } = args;
 
   let browser;
   try {
@@ -188,7 +129,7 @@ async function fetchPage(url, args) {
   const status = response ? response.status() : null;
   const contentType = response ? (response.headers()['content-type'] || null) : null;
 
-  // Resolve content frame (iframe detection) — used by plain and markdown modes
+  // Resolve content frame (iframe detection)
   const contentFrame =
     page.frames().find((f) => f !== page.mainFrame() && f.url() !== 'about:blank') || page;
 
@@ -225,28 +166,48 @@ async function fetchPage(url, args) {
     process.exit(EXIT.EXTRACTION_FAILED);
   }
 
+  // Extract links if requested
+  let pageLinks = null;
+  if (links) {
+    const anchors = await page.$$eval('a[href]', (els) => els.map((el) => el.getAttribute('href')));
+    pageLinks = extractLinks(finalUrl, anchors);
+  }
+
+  // Extract metadata if requested
+  let pageMeta = null;
+  if (metadata) {
+    const metaTags = await page.$$eval('meta', (els) =>
+      els.map((el) => ({
+        name: el.getAttribute('name'),
+        property: el.getAttribute('property'),
+        content: el.getAttribute('content'),
+      }))
+    );
+    pageMeta = extractMeta(metaTags, title);
+  }
+
   await browser.close();
-  return { finalUrl, title, status, contentType, text };
+  return { finalUrl, title, status, contentType, text, links: pageLinks, meta: pageMeta };
 }
 
 async function main() {
   const args = parseArgs(process.argv);
 
   if (!args.url) {
-    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--links] [--metadata] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
   if (!isValidUrl(args.url)) {
     console.error(`Invalid URL: ${args.url}`);
-    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
+    console.error('Usage: node fetch.js <url> [--json] [--markdown] [--url] [--links] [--metadata] [--stealth] [--headed] [--ua <string>] [--no-ua] [--screenshot <path>] [--selector <css>] [--max-chars <n>] [--wait <ms>] [--wait-for <selector>] [--timeout <ms>] [--retry <n>]');
     process.exit(EXIT.INVALID_ARGS);
   }
 
-  const { finalUrl, title, status, contentType, text: rawText } = await fetchPage(args.url, args);
+  const { finalUrl, title, status, contentType, text: rawText, links, meta } = await fetchPage(args.url, args);
 
   if (args.json) {
-    emitJson({
+    const payload = {
       success: true,
       url: finalUrl,
       title,
@@ -254,7 +215,14 @@ async function main() {
       contentType,
       timestamp: new Date().toISOString(),
       text: rawText,
-    }, args.maxChars);
+    };
+    if (links !== null) payload.links = links;
+    if (meta !== null) payload.meta = meta;
+    emitJson(payload, args.maxChars);
+  } else if (args.links) {
+    console.log(JSON.stringify(links));
+  } else if (args.metadata) {
+    console.log(JSON.stringify(meta));
   } else {
     let text = rawText;
     if (args.maxChars !== null && text.length > args.maxChars) {
