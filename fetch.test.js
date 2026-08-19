@@ -262,3 +262,55 @@ describe('--screenshot', () => {
     fs.unlinkSync(screenshotPath); // clean up
   });
 });
+
+describe('--links', () => {
+  it('outputs a JSON array of absolute URLs', () => {
+    const result = run(['https://example.com', '--retry', '0', '--links'], 30000);
+    assert.equal(result.status, 0);
+    const links = JSON.parse(result.stdout);
+    assert.ok(Array.isArray(links), 'output should be a JSON array');
+    assert.ok(links.length > 0, 'should have at least one link');
+    // All links must be absolute URLs
+    for (const link of links) {
+      assert.match(link, /^https?:\/\//, `link should be absolute: ${link}`);
+    }
+  });
+
+  it('deduplicates links', () => {
+    const result = run(['https://example.com', '--retry', '0', '--links'], 30000);
+    assert.equal(result.status, 0);
+    const links = JSON.parse(result.stdout);
+    const unique = [...new Set(links)];
+    assert.deepEqual(links, unique, 'links should be deduplicated');
+  });
+
+  it('merges links array into --json output when combined', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--links'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.ok(Array.isArray(json.links), 'json.links should be an array');
+    assert.ok(json.links.length > 0, 'json.links should have entries');
+  });
+});
+
+describe('--metadata', () => {
+  it('outputs a JSON object with meta fields', () => {
+    const result = run(['https://example.com', '--retry', '0', '--metadata'], 30000);
+    assert.equal(result.status, 0);
+    const meta = JSON.parse(result.stdout);
+    assert.equal(typeof meta, 'object', 'output should be a JSON object');
+    assert.ok(!Array.isArray(meta), 'output should not be an array');
+    // title is always present (from <title> tag)
+    assert.equal(typeof meta.title, 'string');
+  });
+
+  it('merges meta object into --json output when combined', () => {
+    const result = run(['https://example.com', '--retry', '0', '--json', '--metadata'], 30000);
+    assert.equal(result.status, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.success, true);
+    assert.equal(typeof json.meta, 'object', 'json.meta should be an object');
+    assert.equal(typeof json.meta.title, 'string');
+  });
+});
