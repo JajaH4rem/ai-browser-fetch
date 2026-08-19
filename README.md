@@ -51,19 +51,36 @@ ai-browser-fetch is the fallback. One command. Predictable output. The agent doe
 
 ## Install
 
+**Use without installing (recommended):**
+```bash
+npx playwright install chromium  # one-time browser setup
+npx ai-browser-fetch https://example.com
+```
+
+**Install globally:**
+```bash
+npm install -g ai-browser-fetch
+npx playwright install chromium  # one-time browser setup
+ai-fetch https://example.com
+```
+
+**Clone and run locally:**
 ```bash
 git clone https://github.com/JajaH4rem/ai-browser-fetch
 cd ai-browser-fetch
 npm install
 npx playwright install chromium
+node fetch.js https://example.com
 ```
+
+> Chromium must be installed separately. If you see a "Chromium not found" error, run `npx playwright install chromium`.
 
 ---
 
 ## Quick start
 
 ```bash
-node fetch.js https://example.com
+npx ai-browser-fetch https://example.com
 ```
 
 ---

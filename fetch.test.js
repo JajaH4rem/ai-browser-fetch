@@ -9,6 +9,22 @@ function run(args, timeout = 30000) {
   return spawnSync('node', [SCRIPT, ...args], { encoding: 'utf8', timeout });
 }
 
+describe('missing Chromium detection', () => {
+  it('prints actionable error and exits 3 when PLAYWRIGHT_BROWSERS_PATH points to empty dir', () => {
+    const os = require('node:os');
+    const fs = require('node:fs');
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-browsers-'));
+    const result = spawnSync(
+      'node',
+      [SCRIPT, 'https://example.com', '--retry', '0'],
+      { encoding: 'utf8', timeout: 15000, env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: emptyDir } }
+    );
+    fs.rmdirSync(emptyDir);
+    assert.equal(result.status, 3);
+    assert.match(result.stderr, /playwright install chromium/i);
+  });
+});
+
 describe('core fetch', () => {
   // existing tests unchanged below
   it('exits with code 1 and prints usage when no URL given', () => {

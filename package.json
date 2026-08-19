@@ -3,6 +3,29 @@
   "version": "0.1.0",
   "description": "A drop-in browser fetch for AI agents.",
   "main": "fetch.js",
+  "bin": {
+    "ai-fetch": "./fetch.js"
+  },
+  "files": [
+    "fetch.js",
+    "lib",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "playwright",
+    "browser",
+    "fetch",
+    "ai",
+    "agents",
+    "scraper",
+    "headless",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JajaH4rem/ai-browser-fetch"
+  },
   "scripts": {
     "test": "node --test fetch.test.js"
   },
